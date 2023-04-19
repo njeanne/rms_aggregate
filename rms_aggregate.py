@@ -77,14 +77,13 @@ def aggregate_rmsd(conditions):
     :return: the median for each frame.
     :rtype: pandas.DataFrame
     """
-    logging.info("Aggregating RMSD CSV files data:")
     data = {"frames": [], "conditions": [], "RMSD median": []}
     pattern = re.compile(".+?_(.+)\\.csv")
     frames = []
     for _, row_condition in conditions.iterrows():
         df_raw = pd.DataFrame()
-        logging.info(f"\tCondition: {row_condition['condition']}")
-        for item in [fn for fn in os.listdir(row_condition["path"]) if fn.startswith("RMSD")]:
+        logging.info(f"Aggregating data for condition: {row_condition['condition']}")
+        for item in [fn for fn in os.listdir(row_condition["path"]) if fn.startswith("RMSD") and fn.endswith(".csv")]:
             logging.info(f"\t\t- {item}")
             match = pattern.search(item)
             if match:
@@ -104,6 +103,7 @@ def aggregate_rmsd(conditions):
             df_raw[sample] = df_current["RMSD"]
         data["frames"] = data["frames"] + frames
         data["conditions"] = data["conditions"] + [row_condition['condition']] * len(frames)
+        logging.info(f"Computing RMSD medians for condition: {row_condition['condition']}")
         medians = []
         for _, row_rmsd in df_raw.iterrows():
             medians.append(row_rmsd.median())
@@ -111,7 +111,7 @@ def aggregate_rmsd(conditions):
     return pd.DataFrame.from_dict(data)
 
 
-def plot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, subtitle):
+def plot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, region):
     """
     Plot the aggregated RMSD medians.
 
@@ -125,17 +125,16 @@ def plot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, subtitl
     :type fmt: str
     :param conditions_colors: the colors of the conditions.
     :type conditions_colors: list
-    :param subtitle: the plot subtitle.
-    :type subtitle: str
+    :param region: the region.
+    :type region: str
     """
-    rmsd_ax = sns.lineplot(data=src, x="frames", y="RMSD median", hue="conditions", palette=conditions_colors)
+    rmsd_ax = sns.lineplot(data=src, x="frames", y="RMSD median", hue="conditions", palette=conditions_colors,
+                           alpha=0.5)
     plot = rmsd_ax.get_figure()
-    plt.suptitle(f"RMSD: {md_time} ns", fontsize="large", fontweight="bold")
-    if subtitle:
-        plt.title(subtitle)
+    plt.suptitle(f"RMSD: {region} {md_time} ns", fontsize="large", fontweight="bold")
     plt.xlabel("frames", fontweight="bold")
     plt.ylabel("RMSD medians (\u212B)", fontweight="bold")
-    out_path_plot = os.path.join(dir_path, f"RMSD_{md_time}-ns.{fmt}")
+    out_path_plot = os.path.join(dir_path, f"RMSD_{region.replace(' ', '-')}_{md_time}-ns.{fmt}")
     plot.savefig(out_path_plot)
     logging.info(f"RMSD median plot by condition: {os.path.abspath(out_path_plot)}")
 
@@ -165,9 +164,8 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--out", required=True, type=str, help="the path to the output directory.")
     parser.add_argument("-t", "--md-time", required=True, type=int,
                         help="the molecular dynamics duration in nanoseconds.")
-    parser.add_argument("-i", "--info", required=False, type=str,
-                        help="the molecular dynamics simulation complementary information, as the MD simulation time."
-                             "Set as free text which will be added to the subtitle of the plots.")
+    parser.add_argument("-d", "--domain", required=True, type=str,
+                        help="Free text to specify the domain on which the RMS was computed.")
     parser.add_argument("-x", "--format", required=False, default="svg",
                         choices=["eps", "jpg", "jpeg", "pdf", "pgf", "png", "ps", "raw", "svg", "svgz", "tif", "tiff"],
                         help="the output plots format: 'eps': 'Encapsulated Postscript', "
@@ -201,8 +199,10 @@ if __name__ == "__main__":
 
     logging.info(f"version: {__version__}")
     logging.info(f"CMD: {' '.join(sys.argv)}")
+    logging.info(f"MD simulation time: {args.md_time} ns")
+    logging.info(f"Domain: {args.domain:>16}")
 
     data_conditions = get_conditions(args.input)
     rmsd_by_condition = aggregate_rmsd(data_conditions)
-    plot_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format,data_conditions["color"].to_list(),
-                         args.info)
+    plot_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format, data_conditions["color"].to_list(),
+                         args.domain)
