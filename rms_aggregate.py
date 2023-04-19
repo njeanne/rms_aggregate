@@ -82,8 +82,9 @@ def aggregate_rmsd(conditions):
     frames = []
     for _, row_condition in conditions.iterrows():
         df_raw = pd.DataFrame()
-        logging.info(f"Aggregating data for condition: {row_condition['condition']}")
-        for item in [fn for fn in os.listdir(row_condition["path"]) if fn.startswith("RMSD") and fn.endswith(".csv")]:
+        by_condition = [fn for fn in os.listdir(row_condition["path"]) if fn.startswith("RMSD") and fn.endswith(".csv")]
+        logging.info(f"Aggregating {len(by_condition)} files data for condition: {row_condition['condition']}")
+        for item in by_condition:
             logging.info(f"\t\t- {item}")
             match = pattern.search(item)
             if match:
@@ -102,7 +103,7 @@ def aggregate_rmsd(conditions):
                               f"mask used for the RMS computation.")
             df_raw[sample] = df_current["RMSD"]
         data["frames"] = data["frames"] + frames
-        data["conditions"] = data["conditions"] + [row_condition['condition']] * len(frames)
+        data["conditions"] = data["conditions"] + [f"{row_condition['condition']} ({len(by_condition)})"] * len(frames)
         logging.info(f"Computing RMSD medians for condition: {row_condition['condition']}")
         medians = []
         for _, row_rmsd in df_raw.iterrows():
