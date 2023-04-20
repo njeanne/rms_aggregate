@@ -84,7 +84,7 @@ def aggregate_rmsd(conditions):
         df_raw = pd.DataFrame()
         by_condition = [fn for fn in os.listdir(row_condition["path"]) if fn.startswith("RMSD") and fn.endswith(".csv")]
         logging.info(f"Aggregating {len(by_condition)} files data for condition: {row_condition['condition']}")
-        for item in by_condition:
+        for item in sorted(by_condition):
             logging.info(f"\t\t- {item}")
             match = pattern.search(item)
             if match:
