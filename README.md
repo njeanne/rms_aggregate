@@ -18,9 +18,31 @@ to the directory for the condition and the color in hexadecimal format for the c
 For each condition of the CSV file, the script will search for RMSD CSV files and aggregate them, then compute the 
 median for each frame of the different sample. Finally the script will produce a plot of the median RMSD at each frame.
 
+## Conda environment
+
+A [conda](https://docs.conda.io/projects/conda/en/latest/index.html) YAML environment file is provided: 
+`conda_env/rms_env.yml`. The file contains all the dependencies to run the script.
+
+The conda environment is created using the command:
+```shell script
+# create the environment
+conda env create -f conda_env/rms_env.yml
+
+# activate the environment
+conda activate rms
+```
+
+The usage of the script after activating the conda environment can be displayed with:
+
+## Usage
+
 The script can be tested with the data in the `test` directory:
 ```shell script
+conda activate rms
+
 ./rms_aggregate.py --out results --md-time 10 --domain "domain ORF1" --format svg tests/inputs/inputs_conditions.csv
+
+conda deactivate
 ```
 
 The output is a plot of the median RMSD:
