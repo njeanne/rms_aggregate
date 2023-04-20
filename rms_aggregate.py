@@ -98,9 +98,11 @@ def aggregate_rmsd(conditions):
             elif len(frames) != len(df_current["frames"]):
                 logging.error(f"\tNumber of frames for {item}, {len(df_current['frames'])} frames, differs from the "
                               f"previous number of frames, {len(frames)} frames.")
+                sys.exit(1)
             elif frames != df_current["frames"].to_list():
                 logging.error(f"\tThe frames for {item}, differs from the frames of the previous samples. Check the "
                               f"mask used for the RMS computation.")
+                sys.exit(1)
             df_raw[sample] = df_current["RMSD"]
         data["frames"] = data["frames"] + frames
         data["conditions"] = data["conditions"] + [f"{row_condition['condition']} ({len(by_condition)})"] * len(frames)
