@@ -20,11 +20,11 @@ median for each frame of the different sample. Finally the script will produce a
 
 The script can be tested with the data in the `test` directory:
 ```shell script
-./rms_aggregate.py --out results --md-time 1 --domain "jane doe" --format svg tests/inputs/inputs_conditions.csv
+./rms_aggregate.py --out results --md-time 10 --domain "domain ORF1" --format svg tests/inputs/inputs_conditions.csv
 ```
 
 The output is a plot of the median RMSD:
 
-![median RMSD plot](doc/_static/RMSD_jane-doe_1-ns.svg)
+![median RMSD plot](doc/_static/RMSD_ORF1-domain_10-ns.svg)
 
-The legend displays the conditions and the number of samples for each.
+The legend displays the conditions and the number of samples for each one.

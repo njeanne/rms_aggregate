@@ -114,7 +114,7 @@ def aggregate_rmsd(conditions):
     return pd.DataFrame.from_dict(data)
 
 
-def plot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, region):
+def plot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, domain):
     """
     Plot the aggregated RMSD medians.
 
@@ -128,16 +128,16 @@ def plot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, region)
     :type fmt: str
     :param conditions_colors: the colors of the conditions.
     :type conditions_colors: list
-    :param region: the region.
-    :type region: str
+    :param domain: the studied domain.
+    :type domain: str
     """
     rmsd_ax = sns.lineplot(data=src, x="frames", y="RMSD median", hue="conditions", palette=conditions_colors,
                            alpha=0.5)
     plot = rmsd_ax.get_figure()
-    plt.suptitle(f"RMSD: {region} {md_time} ns", fontsize="large", fontweight="bold")
+    plt.suptitle(f"RMSD medians on {md_time} ns: {domain}", fontsize="large", fontweight="bold")
     plt.xlabel("frames", fontweight="bold")
     plt.ylabel("RMSD medians (\u212B)", fontweight="bold")
-    out_path_plot = os.path.join(dir_path, f"RMSD_{region.replace(' ', '-')}_{md_time}-ns.{fmt}")
+    out_path_plot = os.path.join(dir_path, f"RMSD_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
     plot.savefig(out_path_plot)
     logging.info(f"RMSD median plot by condition: {os.path.abspath(out_path_plot)}")
 
