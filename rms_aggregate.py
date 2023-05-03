@@ -68,22 +68,25 @@ def get_conditions(path):
     return df
 
 
-def aggregate_rmsd(conditions):
+def aggregate_rmsd(conditions, method):
     """
-    Extract the RMSD values of each sample and return the median of the RMSD for each frame.
+    Extract the RMSD values of each sample and return the aggregated RMSD values for each frame.
 
     :param conditions: the conditions dataframe.
     :type conditions: pd.DataFrame
-    :return: the median for each frame.
+    :param method: the method used for the aggregation.
+    :type: str
+    :return: the aggregated data for each frame.
     :rtype: pandas.DataFrame
     """
-    data = {"frames": [], "conditions": [], "RMSD median": []}
+    data = {"frames": [], "conditions": [], f"RMSD {method}": []}
     pattern = re.compile(".+?_(.+)\\.csv")
     frames = []
     for _, row_condition in conditions.iterrows():
         df_raw = pd.DataFrame()
         by_condition = [fn for fn in os.listdir(row_condition["path"]) if fn.startswith("RMSD") and fn.endswith(".csv")]
-        logging.info(f"Aggregating {len(by_condition)} files data for condition: {row_condition['condition']}")
+        logging.info(f"Aggregating {len(by_condition)} file{'s' if len(by_condition) > 1 else ''} data for condition: "
+                     f"{row_condition['condition']}")
         for item in sorted(by_condition):
             logging.info(f"\t\t- {item}")
             match = pattern.search(item)
@@ -106,17 +109,20 @@ def aggregate_rmsd(conditions):
             df_raw[sample] = df_current["RMSD"]
         data["frames"] = data["frames"] + frames
         data["conditions"] = data["conditions"] + [f"{row_condition['condition']} ({len(by_condition)})"] * len(frames)
-        logging.info(f"Computing RMSD medians for condition: {row_condition['condition']}")
-        medians = []
+        logging.info(f"Computing RMSD {method} for condition: {row_condition['condition']}")
+        aggregated = []
         for _, row_rmsd in df_raw.iterrows():
-            medians.append(row_rmsd.median())
-        data["RMSD median"] = data["RMSD median"] + medians
+            if method == "median":
+                aggregated.append(row_rmsd.median())
+            elif method == "average":
+                aggregated.append(row_rmsd.mean())
+        data[f"RMSD {method}"] = data[f"RMSD {method}"] + aggregated
     return pd.DataFrame.from_dict(data)
 
 
-def plot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, domain):
+def lineplot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, method, domain):
     """
-    Plot the aggregated RMSD medians.
+    Create the lineplot of the aggregated RMSD.
 
     :param src: the data source.
     :type src: pd.DataFrame
@@ -128,18 +134,53 @@ def plot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, domain)
     :type fmt: str
     :param conditions_colors: the colors of the conditions.
     :type conditions_colors: list
+    :param method: the method used for the aggregation.
+    :type: str
     :param domain: the studied domain.
     :type domain: str
     """
-    rmsd_ax = sns.lineplot(data=src, x="frames", y="RMSD median", hue="conditions", palette=conditions_colors,
+    rmsd_ax = sns.lineplot(data=src, x="frames", y=f"RMSD {method}", hue="conditions", palette=conditions_colors,
                            alpha=0.5)
     plot = rmsd_ax.get_figure()
-    plt.suptitle(f"RMSD medians on {md_time} ns: {domain}", fontsize="large", fontweight="bold")
+    plt.suptitle(f"RMSD {method} on {md_time} ns: {domain}", fontsize="large", fontweight="bold")
     plt.xlabel("frames", fontweight="bold")
-    plt.ylabel("RMSD medians (\u212B)", fontweight="bold")
-    out_path_plot = os.path.join(dir_path, f"RMSD_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
+    plt.ylabel(f"RMSD {method} (\u212B)", fontweight="bold")
+    out_path_plot = os.path.join(dir_path, f"RMSD_{method}_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
     plot.savefig(out_path_plot)
-    logging.info(f"RMSD median plot by condition: {os.path.abspath(out_path_plot)}")
+    logging.info(f"RMSD {method} lineplot by condition: {os.path.abspath(out_path_plot)}")
+
+
+def histogram_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, method, domain):
+    """
+    Create the histogram of the aggregated RMSD.
+
+    :param src: the data source.
+    :type src: pd.DataFrame
+    :param md_time: the molecular dynamics duration.
+    :type md_time: int
+    :param dir_path: the output directory path.
+    :type dir_path: str
+    :param fmt: the plot output format.
+    :type fmt: str
+    :param conditions_colors: the colors of the conditions.
+    :type conditions_colors: list
+    :param method: the method used for the aggregation.
+    :type: str
+    :param domain: the studied domain.
+    :type domain: str
+    """
+    # clear the previous RMSD line plot
+    plt.clf()
+    # create the histogram
+    rmsd_ax = sns.histplot(data=src, x=f"RMSD {method}", stat="density", kde=True, hue="conditions",
+                           palette=conditions_colors, alpha=0.5)
+    plot = rmsd_ax.get_figure()
+    plt.suptitle(f"RMSD {method} histogram on {md_time} ns: {domain}", fontsize="large", fontweight="bold")
+    plt.xlabel(f"RMSD {method} (\u212B)", fontweight="bold")
+    plt.ylabel("Density", fontweight="bold")
+    out_path_plot = os.path.join(dir_path, f"RMSD_{method}_histogram_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
+    plot.savefig(out_path_plot)
+    logging.info(f"RMSD {method} histogram by condition: {os.path.abspath(out_path_plot)}")
 
 
 if __name__ == "__main__":
@@ -169,6 +210,8 @@ if __name__ == "__main__":
                         help="the molecular dynamics duration in nanoseconds.")
     parser.add_argument("-d", "--domain", required=True, type=str,
                         help="Free text to specify the domain on which the RMS was computed.")
+    parser.add_argument("-a", "--aggregation", required=False, default="median", choices=["median", "average"],
+                        help="the aggregation method to apply.")
     parser.add_argument("-x", "--format", required=False, default="svg",
                         choices=["eps", "jpg", "jpeg", "pdf", "pgf", "png", "ps", "raw", "svg", "svgz", "tif", "tiff"],
                         help="the output plots format: 'eps': 'Encapsulated Postscript', "
@@ -206,6 +249,8 @@ if __name__ == "__main__":
     logging.info(f"Domain: {args.domain:>16}")
 
     data_conditions = get_conditions(args.input)
-    rmsd_by_condition = aggregate_rmsd(data_conditions)
-    plot_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format, data_conditions["color"].to_list(),
-                         args.domain)
+    rmsd_by_condition = aggregate_rmsd(data_conditions, args.aggregation)
+    lineplot_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format, data_conditions["color"].to_list(),
+                             args.aggregation, args.domain)
+    histogram_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format,
+                              data_conditions["color"].to_list(), args.aggregation, args.domain)
