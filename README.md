@@ -1,4 +1,4 @@
-# rms_aggregate
+# RMS aggregation
 
 Aggregate the RMS results in one plot selecting the samples by conditions.
 
