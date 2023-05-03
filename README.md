@@ -33,20 +33,28 @@ conda activate rms
 ```
 
 The usage of the script after activating the conda environment can be displayed with:
+```shell script
+./rms_aggregate.py -h
+```
 
 ## Usage
 
-The script can be tested with the data in the `test` directory:
+The script can be tested with the data in the `test` directory, choosing the median method to aggregate the data:
 ```shell script
 conda activate rms
 
-./rms_aggregate.py --out results --md-time 10 --domain "domain ORF1" --format svg tests/inputs/inputs_conditions.csv
+./rms_aggregate.py --out results --md-time 10 --aggregation median \
+--domain "domain ORF1" --format svg tests/inputs/inputs_conditions.csv
 
 conda deactivate
 ```
 
-The output is a plot of the median RMSD:
+The output are a line plot of the median RMSD by condition:
 
-![median RMSD plot](doc/_static/RMSD_ORF1-domain_10-ns.svg)
+![median RMSD plot](doc/_static/RMSD.svg)
+
+and an histogram of the median RMSD by condition:
+
+![median RMSD plot](doc/_static/RMSD_histogram.svg)
 
 The legend displays the conditions and the number of samples for each one.
