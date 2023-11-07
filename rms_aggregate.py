@@ -7,7 +7,7 @@ Created on 18 Apr. 2023
 __author__ = "Nicolas JEANNE"
 __copyright__ = "GNU General Public License"
 __email__ = "jeanne.n@chu-toulouse.fr"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 import argparse
 import logging
@@ -56,7 +56,7 @@ def create_log(path, level):
 
 def get_conditions(path):
     """
-    Extract the conditions, paths and colors.
+    Extract the conditions, the paths and the colors.
 
     :param path: the path to the CSV file.
     :type path: str
@@ -73,23 +73,29 @@ def aggregate_rmsd(conditions, method):
     Extract the RMSD values of each sample and return the aggregated RMSD values for each frame.
 
     :param conditions: the conditions dataframe.
-    :type conditions: pd.DataFrame
+    :type conditions: pandas.DataFrame
     :param method: the method used for the aggregation.
     :type: str
-    :return: the aggregated data for each frame.
-    :rtype: pandas.DataFrame
+    :return: the aggregated data for each frame and the conditions (in case ons condition is removed).
+    :rtype: pandas.DataFrame, pandas.DataFrame
     """
     data = {"frames": [], "conditions": [], f"RMSD {method}": []}
     pattern = re.compile(".+?_(.+)\\.csv")
     frames = []
+    conditions_to_remove = []
     for _, row_condition in conditions.iterrows():
         df_raw = pd.DataFrame()
         by_condition = [fn for fn in os.listdir(row_condition["path"]) if fn.startswith("RMSD") and fn.endswith(".csv")]
+        if len(by_condition) == 0:
+            conditions_to_remove.append(row_condition["condition"])
+            logging.warning(f"Condition {row_condition['condition']}: no RMSD files, this condition is skipped.")
+            continue
         logging.info(f"Aggregating {len(by_condition)} file{'s' if len(by_condition) > 1 else ''} data for condition: "
                      f"{row_condition['condition']}")
         for item in sorted(by_condition):
             logging.info(f"\t\t- {item}")
             match = pattern.search(item)
+            sample = None
             if match:
                 sample = match.group(1)
             else:
@@ -117,7 +123,10 @@ def aggregate_rmsd(conditions, method):
             elif method == "average":
                 aggregated.append(row_rmsd.mean())
         data[f"RMSD {method}"] = data[f"RMSD {method}"] + aggregated
-    return pd.DataFrame.from_dict(data)
+    # remove conditions if necessary
+    for condition_to_remove in conditions_to_remove:
+        conditions.drop(conditions[conditions["condition"] == condition_to_remove].index, inplace = True)
+    return pd.DataFrame.from_dict(data), conditions
 
 
 def lineplot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, method, domain):
@@ -125,7 +134,7 @@ def lineplot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, met
     Create the lineplot of the aggregated RMSD.
 
     :param src: the data source.
-    :type src: pd.DataFrame
+    :type src: pandas.DataFrame
     :param md_time: the molecular dynamics duration.
     :type md_time: int
     :param dir_path: the output directory path.
@@ -155,7 +164,7 @@ def histogram_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, me
     Create the histogram of the aggregated RMSD.
 
     :param src: the data source.
-    :type src: pd.DataFrame
+    :type src: pandas.DataFrame
     :param md_time: the molecular dynamics duration.
     :type md_time: int
     :param dir_path: the output directory path.
@@ -249,7 +258,7 @@ if __name__ == "__main__":
     logging.info(f"Domain: {args.domain:>16}")
 
     data_conditions = get_conditions(args.input)
-    rmsd_by_condition = aggregate_rmsd(data_conditions, args.aggregation)
+    rmsd_by_condition, data_conditions = aggregate_rmsd(data_conditions, args.aggregation)
     lineplot_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format, data_conditions["color"].to_list(),
                              args.aggregation, args.domain)
     histogram_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format,
