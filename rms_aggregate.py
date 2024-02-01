@@ -76,7 +76,7 @@ def aggregate_rmsd(conditions, method):
     :type conditions: pandas.DataFrame
     :param method: the method used for the aggregation.
     :type: str
-    :return: the aggregated data for each frame and the conditions (in case ons condition is removed).
+    :return: the aggregated data for each frame and the conditions (in case one condition is removed).
     :rtype: pandas.DataFrame, pandas.DataFrame
     """
     data = {"frames": [], "conditions": [], f"RMSD {method}": []}
