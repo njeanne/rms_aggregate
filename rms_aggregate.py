@@ -7,7 +7,7 @@ Created on 18 Apr. 2023
 __author__ = "Nicolas JEANNE"
 __copyright__ = "GNU General Public License"
 __email__ = "jeanne.n@chu-toulouse.fr"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 import argparse
 import logging
@@ -93,7 +93,6 @@ def aggregate_rmsd(conditions, method):
         logging.info(f"Aggregating {len(by_condition)} file{'s' if len(by_condition) > 1 else ''} data for condition: "
                      f"{row_condition['condition']}")
         for item in sorted(by_condition):
-            logging.info(f"\t\t- {item}")
             match = pattern.search(item)
             sample = None
             if match:
@@ -102,6 +101,7 @@ def aggregate_rmsd(conditions, method):
                 logging.error(f"\tNo match between the pattern '{pattern.pattern}' and the file name {item}.")
                 sys.exit(1)
             df_current = pd.read_csv(os.path.join(row_condition["path"], item), sep=",")
+            logging.info(f"\t\t- {item}: {len(df_current['frames'])} frames.")
             if not frames:
                 frames = df_current["frames"].to_list()
             elif len(frames) != len(df_current["frames"]):
