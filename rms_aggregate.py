@@ -7,7 +7,7 @@ Created on 18 Apr. 2023
 __author__ = "Nicolas JEANNE"
 __copyright__ = "GNU General Public License"
 __email__ = "jeanne.n@chu-toulouse.fr"
-__version__ = "1.0.2"
+__version__ = "1.1.0"
 
 import argparse
 import logging
@@ -16,9 +16,10 @@ import re
 import sys
 
 import matplotlib
-matplotlib.use('Agg')
-import pandas as pd
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import pandas as pd
+import scipy
 import seaborn as sns
 
 
@@ -68,7 +69,7 @@ def get_conditions(path):
     return df
 
 
-def aggregate_rmsd(conditions, method):
+def aggregate_rmsd(conditions, method, data_out_path):
     """
     Extract the RMSD values of each sample and return the aggregated RMSD values for each frame.
 
@@ -76,6 +77,8 @@ def aggregate_rmsd(conditions, method):
     :type conditions: pandas.DataFrame
     :param method: the method used for the aggregation.
     :type: str
+    :param data_out_path: the path to output data file.
+    :type data_out_path: str
     :return: the aggregated data for each frame and the conditions (in case one condition is removed).
     :rtype: pandas.DataFrame, pandas.DataFrame
     """
@@ -85,7 +88,8 @@ def aggregate_rmsd(conditions, method):
     conditions_to_remove = []
     for _, row_condition in conditions.iterrows():
         df_raw = pd.DataFrame()
-        by_condition = [fn for fn in os.listdir(row_condition["path"]) if fn.startswith("RMSD") and fn.endswith(".csv")]
+        by_condition = [fn for fn in os.listdir(row_condition["path"]) if
+                        fn.startswith("RMSD") and not "histogram" in fn and fn.endswith(".csv")]
         if len(by_condition) == 0:
             conditions_to_remove.append(row_condition["condition"])
             logging.warning(f"Condition {row_condition['condition']}: no RMSD files, this condition is skipped.")
@@ -126,7 +130,12 @@ def aggregate_rmsd(conditions, method):
     # remove conditions if necessary
     for condition_to_remove in conditions_to_remove:
         conditions.drop(conditions[conditions["condition"] == condition_to_remove].index, inplace = True)
-    return pd.DataFrame.from_dict(data), conditions
+
+    df = pd.DataFrame.from_dict(data)
+    df.to_csv(data_out_path, sep=',', index=False)
+    logging.info(f"Aggregated RMSD {method} data by condition written: {data_out_path}")
+
+    return df, conditions
 
 
 def lineplot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, method, domain):
@@ -190,6 +199,133 @@ def histogram_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, me
     out_path_plot = os.path.join(dir_path, f"RMSD_{method}_histogram_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
     plot.savefig(out_path_plot)
     logging.info(f"RMSD {method} histogram by condition: {os.path.abspath(out_path_plot)}")
+
+
+def get_stat_results_as_text(stat_test, width):
+    """
+    Transform the test results as a string.
+
+    :param stat_test: the statistical test.
+    :type stat_test: scipy.stats
+    :param width: the padding width.
+    :type width: int
+    :return: the string.
+    :rtype: str
+    """
+    return f"\t{'p.value:':<{width}}{stat_test.pvalue}\n\t{'statistic:':<{width}}{stat_test.statistic}\n"
+
+
+def compute_stats(src, method, out_path):
+    """
+    Compute the statistics of the distributions.
+
+    :param src: the data.
+    :type src: pandas.DataFrame
+    :param method: the method used to gather the data.
+    :type method: str
+    :param out_path: the output path for the statistics results file.
+    :type out_path: str
+    """
+
+    # remove the number of samples in the conditions' column: "condition 1 (18)" -> "condition 1"
+    src["conditions"] = src["conditions"].str.replace(r" \(\d+\)", "", regex=True)
+
+    # subsample by condition and add to a list for comparison tests
+    conditions_subsampling_list = []
+    conditions = list(set(src["conditions"].tolist()))
+
+    logging.info(f"Performing statistical tests on the {method} for the following conditions "
+                 f"\"{', '.join(conditions)}\":")
+    padding = 20
+    alpha_risk = 0.05
+    with open(out_path, "w") as out:
+        out.write("############################\n")
+        out.write("#                          #\n")
+        out.write("#     data description     #\n")
+        out.write("#                          #\n")
+        out.write("############################\n\n")
+        normality = True
+        variance_equality = True
+        for condition in conditions:
+            conditions_subsampling_list.append(src[f"RMSD {method}"][src["conditions"] == condition])
+            condition_rows = src[f"RMSD {method}"][src["conditions"] == condition]
+            out.write(f"Description of the \"{condition}\" distribution:\n")
+            description = scipy.stats.describe(condition_rows)
+            out.write(f"\t{'observations:':<{padding}}{description.nobs}\n")
+            out.write(f"\t{'minimum:':<{padding}}{description.minmax[0]}\n")
+            out.write(f"\t{'maximum:':<{padding}}{description.minmax[1]}\n")
+            out.write(f"\t{'mean:':<{padding}}{description.mean}\n")
+            out.write(f"\t{'variance:':<{padding}}{description.variance}\n")
+            out.write(f"\t{'skewness:':<{padding}}{description.skewness}\n")
+            out.write(f"\t{'kurtosis:':<{padding}}{description.kurtosis}\n")
+
+            out.write(f"\nNormality test (Shapiro) for the \"{condition}\" distribution:\n")
+            shapiro_test = scipy.stats.shapiro(condition_rows)
+            out.write(get_stat_results_as_text(shapiro_test, padding))
+            message = (f"Interpretation: \"{condition}\" distribution "
+                       f"{'do not f' if shapiro_test.pvalue <= alpha_risk else 'f'}ollows a Normal law at \u03B1 risk "
+                       f"of {alpha_risk} (p.value {'<=' if shapiro_test.pvalue <= alpha_risk else '>'} {alpha_risk})")
+            out.write(f"\t{message:<{padding}}\n\n")
+            if shapiro_test.pvalue < alpha_risk:
+                normality = False
+
+        out.write(f"\nVariance equality (Bartlett test) for the \"{', '.join(conditions)}\" distributions:\n")
+        bartlett = scipy.stats.bartlett(*conditions_subsampling_list)
+        out.write(get_stat_results_as_text(bartlett, padding))
+        message = (f"Interpretation: For \"{', '.join(conditions)}\" distributions the variance are  "
+                   f"{'not' if bartlett.pvalue <= alpha_risk else ''} equals at \u03B1 risk "
+                   f"of {alpha_risk} (p.value {'<=' if bartlett.pvalue <= alpha_risk else '>'} {alpha_risk})")
+        out.write(f"\t{message:<{padding}}\n\n")
+        if bartlett.pvalue < alpha_risk:
+            variance_equality = False
+
+        out.write("\n############################\n")
+        out.write("#                          #\n")
+        out.write("#     statistical tests    #\n")
+        out.write("#                          #\n")
+        out.write("############################\n\n")
+
+        if normality and variance_equality:
+            message = (" All the distributions follows a normal law and have equal variances, ANOVA and T-test will be "
+                       "applied. ")
+            out.write(f"{message:*^150}\n")
+            out.write(f"\nANOVA test for the \"{', '.join(conditions)}\" distributions:\n")
+            test = scipy.stats.f_oneway(*conditions_subsampling_list)
+        else:
+            if not normality and variance_equality:
+                prefix_message = (" At least one distribution do not follows a normal law and the distributions do not "
+                                  "have equal variances")
+            elif not normality:
+                prefix_message = " At least one distribution do not follows a normal law"
+            else:
+                prefix_message = " The distributions do not have equal variances"
+            message = f"{prefix_message}, Kruskall-Wallis and Mann-Whitney U tests will be applied. "
+            out.write(f"{message:*^150}\n")
+            out.write(f"\nKruskall Wallis test for the \"{', '.join(conditions)}\" distributions:\n")
+            test = scipy.stats.kruskal(*conditions_subsampling_list)
+        out.write(get_stat_results_as_text(test, padding))
+        message = (f"Interpretation: at least one distribution has a mean distinct from the others at a \u03B1 risk of "
+                   f"{alpha_risk} (p.value {'<=' if test.pvalue <= alpha_risk else '>'} {alpha_risk})")
+        out.write(f"\t{message:<{padding}}\n\n")
+
+        for i in range(len(conditions) - 1):
+            distribution_i = src[f"RMSD {method}"][src["conditions"] == conditions[i]]
+            for j in range(i+1, len(conditions)):
+                distribution_j = src[f"RMSD {method}"][src["conditions"] == conditions[j]]
+                if normality:
+                    out.write(f"\nStudent test for the \"{conditions[i]}\" and \"{conditions[j]}\" distributions:\n")
+                    test = scipy.stats.ttest_ind(distribution_i, distribution_j)
+                else:
+                    out.write(f"\nMann Withney U test for the \"{conditions[i]}\" and \"{conditions[j]}\" "
+                              f"distributions:\n")
+                    test = scipy.stats.mannwhitneyu(distribution_i, distribution_j)
+                out.write(get_stat_results_as_text(test, padding))
+                message = (f"Interpretation: \"{conditions[i]}\" and \"{conditions[j]}\" have "
+                           f"{'a different' if test.pvalue <= alpha_risk else 'the same'} mean at a \u03B1 risk of "
+                           f"{alpha_risk} (p.value {'<=' if test.pvalue <= alpha_risk else '>'} {alpha_risk})")
+                out.write(f"\t{message:<{padding}}\n\n")
+
+    logging.info(f"\tStatistical tests results written: {out_path}")
 
 
 if __name__ == "__main__":
@@ -258,8 +394,15 @@ if __name__ == "__main__":
     logging.info(f"Domain: {args.domain:>16}")
 
     data_conditions = get_conditions(args.input)
-    rmsd_by_condition, data_conditions = aggregate_rmsd(data_conditions, args.aggregation)
+    rmsd_by_condition, data_conditions = aggregate_rmsd(data_conditions, args.aggregation,
+                                                        os.path.join(args.out,
+                                                                     f"RMSD_data_{args.domain.replace(' ', '-')}_"
+                                                                     f"{args.md_time}-ns.csv"))
     lineplot_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format, data_conditions["color"].to_list(),
                              args.aggregation, args.domain)
     histogram_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format,
                               data_conditions["color"].to_list(), args.aggregation, args.domain)
+
+    compute_stats(rmsd_by_condition, args.aggregation, os.path.join(args.out,
+                                                                f"statistics_RMSD_data_{args.domain.replace(' ', '-')}"
+                                                                f"_{args.md_time}-ns.txt"))
