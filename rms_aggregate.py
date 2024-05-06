@@ -105,7 +105,8 @@ def aggregate_rmsd(conditions, method, data_out_path):
                 logging.error(f"\tNo match between the pattern '{pattern.pattern}' and the file name {item}.")
                 sys.exit(1)
             df_current = pd.read_csv(os.path.join(row_condition["path"], item), sep=",")
-            logging.info(f"\t\t- {item}: {len(df_current['frames'])} frames.")
+            prefix = f"\t\t- {item}:"
+            logging.info(f"{prefix:<60}{len(df_current['frames'])} frames.")
             if not frames:
                 frames = df_current["frames"].to_list()
             elif len(frames) != len(df_current["frames"]):
@@ -262,20 +263,20 @@ def compute_stats(src, method, out_path):
             out.write(f"\nNormality test (Shapiro) for the \"{condition}\" distribution:\n")
             shapiro_test = scipy.stats.shapiro(condition_rows)
             out.write(get_stat_results_as_text(shapiro_test, padding))
-            message = (f"Interpretation: \"{condition}\" distribution "
+            message = (f"{'Interpretation:':<{padding}}\"{condition}\" distribution "
                        f"{'do not f' if shapiro_test.pvalue <= alpha_risk else 'f'}ollows a Normal law at \u03B1 risk "
                        f"of {alpha_risk} (p.value {'<=' if shapiro_test.pvalue <= alpha_risk else '>'} {alpha_risk})")
-            out.write(f"\t{message:<{padding}}\n\n")
+            out.write(f"\t{message}\n\n")
             if shapiro_test.pvalue < alpha_risk:
                 normality = False
 
         out.write(f"\nVariance equality (Bartlett test) for the \"{', '.join(conditions)}\" distributions:\n")
         bartlett = scipy.stats.bartlett(*conditions_subsampling_list)
         out.write(get_stat_results_as_text(bartlett, padding))
-        message = (f"Interpretation: For \"{', '.join(conditions)}\" distributions the variance are  "
+        message = (f"{'Interpretation:':<{padding}}For \"{', '.join(conditions)}\" distributions the variance are  "
                    f"{'not' if bartlett.pvalue <= alpha_risk else ''} equals at \u03B1 risk "
                    f"of {alpha_risk} (p.value {'<=' if bartlett.pvalue <= alpha_risk else '>'} {alpha_risk})")
-        out.write(f"\t{message:<{padding}}\n\n")
+        out.write(f"\t{message}\n\n")
         if bartlett.pvalue < alpha_risk:
             variance_equality = False
 
@@ -304,9 +305,9 @@ def compute_stats(src, method, out_path):
             out.write(f"\nKruskall Wallis test for the \"{', '.join(conditions)}\" distributions:\n")
             test = scipy.stats.kruskal(*conditions_subsampling_list)
         out.write(get_stat_results_as_text(test, padding))
-        message = (f"Interpretation: at least one distribution has a mean distinct from the others at a \u03B1 risk of "
-                   f"{alpha_risk} (p.value {'<=' if test.pvalue <= alpha_risk else '>'} {alpha_risk})")
-        out.write(f"\t{message:<{padding}}\n\n")
+        message = (f"{'Interpretation:':<{padding}}at least one distribution has a mean distinct from the others at a "
+                   f"\u03B1 risk of {alpha_risk} (p.value {'<=' if test.pvalue <= alpha_risk else '>'} {alpha_risk})")
+        out.write(f"\t{message}\n\n")
 
         for i in range(len(conditions) - 1):
             distribution_i = src[f"RMSD {method}"][src["conditions"] == conditions[i]]
@@ -320,10 +321,10 @@ def compute_stats(src, method, out_path):
                               f"distributions:\n")
                     test = scipy.stats.mannwhitneyu(distribution_i, distribution_j)
                 out.write(get_stat_results_as_text(test, padding))
-                message = (f"Interpretation: \"{conditions[i]}\" and \"{conditions[j]}\" have "
+                message = (f"{'Interpretation:':<{padding}}\"{conditions[i]}\" and \"{conditions[j]}\" have "
                            f"{'a different' if test.pvalue <= alpha_risk else 'the same'} mean at a \u03B1 risk of "
                            f"{alpha_risk} (p.value {'<=' if test.pvalue <= alpha_risk else '>'} {alpha_risk})")
-                out.write(f"\t{message:<{padding}}\n\n")
+                out.write(f"\t{message}\n\n")
 
     logging.info(f"\tStatistical tests results written: {out_path}")
 
