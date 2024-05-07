@@ -348,7 +348,8 @@ if __name__ == "__main__":
     insertions,tests/inputs/insertions,#fc030b
     WT,tests/inputs/WT,#0303fc
 
-    The output is a plot with the aggregated RMSD values by condition.
+    The outputs are a line plot and an histogram with the aggregated RMSD values by condition, a CSV file with the 
+    aggregated RMSD values used to create the plots and a statistics file.
     """
     parser = argparse.ArgumentParser(description=descr, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-o", "--out", required=True, type=str, help="the path to the output directory.")
