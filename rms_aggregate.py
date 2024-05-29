@@ -7,7 +7,7 @@ Created on 18 Apr. 2023
 __author__ = "Nicolas JEANNE"
 __copyright__ = "GNU General Public License"
 __email__ = "jeanne.n@chu-toulouse.fr"
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import argparse
 import logging
@@ -18,6 +18,7 @@ import sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy
 import pandas as pd
 import scipy
 import seaborn as sns
@@ -69,7 +70,7 @@ def get_conditions(path):
     return df
 
 
-def aggregate_rmsd(conditions, method, data_out_path):
+def extract_rmsd_data(conditions, method, out_dir, domain, md_time):
     """
     Extract the RMSD values of each sample and return the aggregated RMSD values for each frame.
 
@@ -77,12 +78,18 @@ def aggregate_rmsd(conditions, method, data_out_path):
     :type conditions: pandas.DataFrame
     :param method: the method used for the aggregation.
     :type: str
-    :param data_out_path: the path to output data file.
-    :type data_out_path: str
-    :return: the aggregated data for each frame and the conditions (in case one condition is removed).
-    :rtype: pandas.DataFrame, pandas.DataFrame
+    :param out_dir: the path to output directory.
+    :type out_dir: str
+    :param domain: the domain.
+    :type domain: str
+    :param md_time: the molecular dynamics simulation time.
+    :type md_time: int
+    :return: the aggregated data for each frame, the RMSD data grouped by condition and the conditions (in case one 
+    condition is removed).
+    :rtype: pandas.DataFrame, pandas.DataFrame, pandas.DataFrame
     """
-    data = {"frames": [], "conditions": [], f"RMSD {method}": []}
+    data_aggregated = {"frame": [], "condition": [], f"RMSD {method}": []}
+    data_by_condition = {"sample": [], "condition": [], "RMSD": []}
     pattern = re.compile(".+?_(.+)\\.csv")
     frames = []
     conditions_to_remove = []
@@ -94,8 +101,8 @@ def aggregate_rmsd(conditions, method, data_out_path):
             conditions_to_remove.append(row_condition["condition"])
             logging.warning(f"Condition {row_condition['condition']}: no RMSD files, this condition is skipped.")
             continue
-        logging.info(f"Aggregating {len(by_condition)} file{'s' if len(by_condition) > 1 else ''} data for condition: "
-                     f"{row_condition['condition']}")
+        logging.info(f"Extracting data from {len(by_condition)} file{'s' if len(by_condition) > 1 else ''} for "
+                     f"condition: {row_condition['condition']}")
         for item in sorted(by_condition):
             match = pattern.search(item)
             sample = None
@@ -106,7 +113,7 @@ def aggregate_rmsd(conditions, method, data_out_path):
                 sys.exit(1)
             df_current = pd.read_csv(os.path.join(row_condition["path"], item), sep=",")
             prefix = f"\t\t- {item}:"
-            logging.info(f"{prefix:<60}{len(df_current['frames'])} frames.")
+            logging.info(f"{prefix:<80}{len(df_current['frames'])} frames.")
             if not frames:
                 frames = df_current["frames"].to_list()
             elif len(frames) != len(df_current["frames"]):
@@ -118,25 +125,200 @@ def aggregate_rmsd(conditions, method, data_out_path):
                               f"mask used for the RMS computation.")
                 sys.exit(1)
             df_raw[sample] = df_current["RMSD"]
-        data["frames"] = data["frames"] + frames
-        data["conditions"] = data["conditions"] + [f"{row_condition['condition']} ({len(by_condition)})"] * len(frames)
-        logging.info(f"Computing RMSD {method} for condition: {row_condition['condition']}")
+
+            # add the data by group for each sample
+            data_by_condition["sample"] = data_by_condition["sample"] + [sample] * len(df_current["frames"])
+            data_by_condition["condition"] = (data_by_condition["condition"] +
+                                              [f"{row_condition['condition']} ({len(by_condition)})"] *
+                                              len(df_current["frames"]))
+            data_by_condition["RMSD"] = data_by_condition["RMSD"] + df_current["RMSD"].tolist()
+
+        # aggregate
+        data_aggregated["frame"] = data_aggregated["frame"] + frames
+        data_aggregated["condition"] = data_aggregated["condition"] + [
+            f"{row_condition['condition']} ({len(by_condition)})"] * len(frames)
+        logging.info(f"\tComputing the RMSD {method} for "
+                     f"{'the '+str(len(by_condition)) if len(by_condition) > 1 else 'the'} "
+                     f"file{'s' if len(by_condition) > 1 else ''} of the condition: {row_condition['condition']}")
         aggregated = []
         for _, row_rmsd in df_raw.iterrows():
             if method == "median":
                 aggregated.append(row_rmsd.median())
             elif method == "average":
                 aggregated.append(row_rmsd.mean())
-        data[f"RMSD {method}"] = data[f"RMSD {method}"] + aggregated
+        data_aggregated[f"RMSD {method}"] = data_aggregated[f"RMSD {method}"] + aggregated
     # remove conditions if necessary
     for condition_to_remove in conditions_to_remove:
         conditions.drop(conditions[conditions["condition"] == condition_to_remove].index, inplace = True)
 
-    df = pd.DataFrame.from_dict(data)
-    df.to_csv(data_out_path, sep=',', index=False)
-    logging.info(f"Aggregated RMSD {method} data by condition written: {data_out_path}")
+    df_by_condition = pd.DataFrame.from_dict(data_by_condition)
+    out_by_condition = os.path.join(out_dir, f"RMSD_data_{domain.replace(' ', '-')}_{md_time}-ns.csv")
+    df_by_condition.to_csv(out_by_condition, sep=',', index=False)
+    logging.info(f"RMSD data written: {out_by_condition}")
 
-    return df, conditions
+    df_aggregated = pd.DataFrame.from_dict(data_aggregated)
+    out_aggregated = os.path.join(out_dir, f"RMSD_aggregated_{method}_data_{domain.replace(' ', '-')}_{md_time}"
+                                             f"-ns.csv")
+    df_aggregated.to_csv(out_aggregated, sep=',', index=False)
+    logging.info(f"RMSD {method} aggregated data written: {out_aggregated}")
+    
+    df_by_condition = pd.DataFrame.from_dict(data_by_condition)
+
+    return df_aggregated, df_by_condition, conditions
+
+
+def histogram_rmsd(src, src_ci, domain, md_time, dir_path, fmt, conditions_colors):
+    """
+    Create the histogram of the RMSD by condition.
+
+    :param src: the RMSD data.
+    :type src: pandas.DataFrame
+    :param src_ci: the confidence intervals data.
+    :type src_ci: pandas.DataFrame
+    :param domain: the studied domain.
+    :type domain: str
+    :param md_time: the molecular dynamics duration.
+    :type md_time: int
+    :param dir_path: the output directory path.
+    :type dir_path: str
+    :param fmt: the plot output format.
+    :type fmt: str
+    :param conditions_colors: the colors of the conditions.
+    :type conditions_colors: list
+
+    """
+    # clear the previous plot
+    plt.clf()
+
+    # create the histogram
+    rmsd_ax = sns.histplot(data=src, x="RMSD", stat="density", kde=True, hue="condition", palette=conditions_colors,
+                           alpha=0.5)
+    # add the Means and Confidence intervals
+    ci_y_coord = rmsd_ax.get_ylim()[1]
+    for index, row in src_ci.iterrows():
+        rmsd_ax.hlines(ci_y_coord, row["min confidence interval"], row["max confidence interval"], linestyle="--",
+                       color=conditions_colors[index])
+        rmsd_ax.plot(row["min confidence interval"], ci_y_coord, marker="|", color=conditions_colors[index])
+        rmsd_ax.plot(row["mean"], ci_y_coord, marker="o", color=conditions_colors[index])
+        rmsd_ax.plot(row["max confidence interval"], ci_y_coord, marker="|", color=conditions_colors[index])
+        ci_y_coord = ci_y_coord + 0.05
+
+    plot = rmsd_ax.get_figure()
+    plt.suptitle(f"RMSD histogram on {md_time} ns: {domain}", fontsize="large", fontweight="bold")
+    plt.xlabel(f"RMSD (\u212B)", fontweight="bold")
+    plt.ylabel("Density", fontweight="bold")
+    out_path_plot = os.path.join(dir_path, f"RMSD_histogram_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
+    plot.savefig(out_path_plot)
+    logging.info(f"RMSD histogram by condition: {os.path.abspath(out_path_plot)}")
+
+
+
+def data_for_stats(src):
+    """
+    Remove the number of samples in the conditions' column: "condition 1 (18)" -> "condition 1"
+
+    :param src: the data.
+    :type src: pandas.DataFrame
+    :return: the
+    """
+    src_copy = src.copy(deep=True)
+    src_copy["condition"] = src_copy["condition"].str.replace(r" \(\d+\)", "", regex=True)
+    return src_copy
+
+
+def write_stat_section_header(title):
+    """
+    Create the box for the statistics files.
+
+    :param title: the title to write in the box.
+    :type title: str
+    :return: the box with the title.
+    :rtype: str
+    """
+
+    box_size = len(title) + 2 * 6
+    box = (f"{'#' * box_size}\n"
+           f"#{' ' * (box_size - 2)}#\n"
+           f"#{' ' * 5}{title}{' ' * 5}#\n"
+           f"#{' ' * (box_size - 2)}#\n"
+           f"{'#' * box_size}\n")
+    return box
+
+
+def data_description(data, padding, txt):
+    """
+    Create the description text.
+
+    :param data: the data to describe.
+    :type data: pandas.core.series.Series
+    :param padding: the spaces between the key and the value of a result.
+    :type padding: int
+    :param txt: the text that presents the description.
+    :type txt: str
+    :return: the text of the data description.
+    :rtype: str
+    """
+    description = scipy.stats.describe(data)
+    txt = f"{txt}\n\t{'observations:':<{padding}}{description.nobs}"
+    txt = f"{txt}\n\t{'minimum:':<{padding}}{description.minmax[0]}"
+    txt = f"{txt}\n\t{'maximum:':<{padding}}{description.minmax[1]}"
+    txt = f"{txt}\n\t{'mean:':<{padding}}{description.mean}"
+    txt = f"{txt}\n\t{'variance:':<{padding}}{description.variance}"
+    txt = f"{txt}\n\t{'skewness:':<{padding}}{description.skewness}"
+    txt = f"{txt}\n\t{'kurtosis:':<{padding}}{description.kurtosis}\n"
+    return txt
+
+
+def compute_stats_by_condition(src, alpha_risk, padding_space, out_path):
+    """
+    Compute the statistics of the RMSD for all the samples by condition.
+
+    :param src: the data for all the RMSD values.
+    :type src: pandas.DataFrame
+    :param alpha_risk: the alpha risk for the statistical tests.
+    :type alpha_risk: float
+    :param padding_space: the spaces between the key and the value of a result.
+    :type padding_space: int
+    :param out_path: the output path for the statistics results' file.
+    :type out_path: str
+    :return: the dataframe of the mean and confidence intervals by condition.
+    :rtype: pandas.DataFrame
+    """
+
+    # get the conditions as a list, for loop performed to keep the conditions' order
+    conditions = []
+    for condition in src["condition"]:
+        if condition not in conditions:
+            conditions.append(condition)
+
+    logging.info(f"Performing statistical tests for all the RMSD data for the following conditions "
+                 f"\"{', '.join(conditions)}\":")
+    txt_mean_ci = ""
+    conf_intervals = {"condition": [], "mean": [], "min confidence interval": [], "max confidence interval": []}
+    with open(out_path, "w") as out:
+        title_box = write_stat_section_header("Data Description")
+        out.write(title_box)
+        for condition in conditions:
+            condition_rows = src[f"RMSD"][src["condition"] == condition]
+            data_description_text = data_description(condition_rows, padding_space,
+                                                     f"\nDescription of the \"{condition}\" distribution:")
+            out.write(data_description_text)
+            txt_mean_ci = f"{txt_mean_ci}Condition \"{condition}\":\n"
+            mean = numpy.mean(condition_rows)
+            norm_ci = scipy.stats.norm.interval(1 - alpha_risk, loc=mean, scale=numpy.std(condition_rows))
+            conf_intervals["condition"].append(condition)
+            conf_intervals["mean"].append(mean)
+            conf_intervals["min confidence interval"].append(norm_ci[0])
+            conf_intervals["max confidence interval"].append(norm_ci[1])
+            txt_mean_ci = f"{txt_mean_ci}\t{'Mean:':<{padding_space}}{mean}\n"
+            txt_mean_ci = f"{txt_mean_ci}\t{'Confidence interval:':<{padding_space}}{norm_ci[0]} - {norm_ci[1]}\n\n"
+
+        title_box = write_stat_section_header("Confidence Intervals")
+        out.write(f"\n{title_box}\n")
+        out.write(txt_mean_ci)
+
+    logging.info(f"\tStatistical tests on all the samples by condition written: {out_path}")
+    return pd.DataFrame.from_dict(conf_intervals)
 
 
 def lineplot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, method, domain):
@@ -158,15 +340,19 @@ def lineplot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, met
     :param domain: the studied domain.
     :type domain: str
     """
-    rmsd_ax = sns.lineplot(data=src, x="frames", y=f"RMSD {method}", hue="conditions", palette=conditions_colors,
+    # clear the previous plot
+    plt.clf()
+    # create the lineplot
+    rmsd_aggregated_ax = sns.lineplot(data=src, x="frame", y=f"RMSD {method}", hue="condition", palette=conditions_colors,
                            alpha=0.5)
-    plot = rmsd_ax.get_figure()
+    rmsd_aggregated_ax.set_xlim(min(src["frame"]), max(src["frame"]))
+    plot = rmsd_aggregated_ax.get_figure()
     plt.suptitle(f"RMSD {method} on {md_time} ns: {domain}", fontsize="large", fontweight="bold")
-    plt.xlabel("frames", fontweight="bold")
+    plt.xlabel("frame", fontweight="bold")
     plt.ylabel(f"RMSD {method} (\u212B)", fontweight="bold")
-    out_path_plot = os.path.join(dir_path, f"RMSD_{method}_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
+    out_path_plot = os.path.join(dir_path, f"RMSD_aggregated_{method}_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
     plot.savefig(out_path_plot)
-    logging.info(f"RMSD {method} lineplot by condition: {os.path.abspath(out_path_plot)}")
+    logging.info(f"{method} RMSD aggregated by condition lineplot: {os.path.abspath(out_path_plot)}")
 
 
 def histogram_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, method, domain):
@@ -188,18 +374,19 @@ def histogram_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, me
     :param domain: the studied domain.
     :type domain: str
     """
-    # clear the previous RMSD line plot
+    # clear the previous plot
     plt.clf()
     # create the histogram
-    rmsd_ax = sns.histplot(data=src, x=f"RMSD {method}", stat="density", kde=True, hue="conditions",
+    rmsd_aggregated_ax = sns.histplot(data=src, x=f"RMSD {method}", stat="density", kde=True, hue="condition",
                            palette=conditions_colors, alpha=0.5)
-    plot = rmsd_ax.get_figure()
+    plot = rmsd_aggregated_ax.get_figure()
     plt.suptitle(f"RMSD {method} histogram on {md_time} ns: {domain}", fontsize="large", fontweight="bold")
     plt.xlabel(f"RMSD {method} (\u212B)", fontweight="bold")
     plt.ylabel("Density", fontweight="bold")
-    out_path_plot = os.path.join(dir_path, f"RMSD_{method}_histogram_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
+    out_path_plot = os.path.join(dir_path,
+                                 f"RMSD_aggregated_{method}_histogram_{domain.replace(' ', '-')}_{md_time}-ns.{fmt}")
     plot.savefig(out_path_plot)
-    logging.info(f"RMSD {method} histogram by condition: {os.path.abspath(out_path_plot)}")
+    logging.info(f"{method} RMSD aggregated by condition histogram: {os.path.abspath(out_path_plot)}")
 
 
 def get_stat_results_as_text(stat_test, width):
@@ -215,55 +402,56 @@ def get_stat_results_as_text(stat_test, width):
     """
     return f"\t{'p.value:':<{width}}{stat_test.pvalue}\n\t{'statistic:':<{width}}{stat_test.statistic}\n"
 
-
-def compute_stats(src, method, out_path):
+def compute_stats_aggregated(src, method, alpha_risk, padding_space, out_path):
     """
-    Compute the statistics of the distributions.
+    Compute the statistics of the aggregated data.
 
-    :param src: the data.
+    :param src: the aggregated RMSD data.
     :type src: pandas.DataFrame
     :param method: the method used to gather the data.
     :type method: str
-    :param out_path: the output path for the statistics results file.
+    :param alpha_risk: the alpha risk for the statistical tests.
+    :type alpha_risk: float
+    :param padding_space: the spaces between the key and the value of a result.
+    :type padding_space: int
+    :param out_path: the output path for the statistics results' file.
     :type out_path: str
     """
 
-    # remove the number of samples in the conditions' column: "condition 1 (18)" -> "condition 1"
-    src["conditions"] = src["conditions"].str.replace(r" \(\d+\)", "", regex=True)
-
     # subsample by condition and add to a list for comparison tests
-    conditions_subsampling_list = []
-    conditions = list(set(src["conditions"].tolist()))
+    aggregated_conditions_subsampling_list = []
+    # get the conditions as a list, for loop performed to keep the conditions' order
+    conditions = []
+    for condition in src["condition"]:
+        if condition not in conditions:
+            conditions.append(condition)
 
-    logging.info(f"Performing statistical tests on the {method} for the following conditions "
+    logging.info(f"Performing statistical tests on the aggregated data for the following conditions "
                  f"\"{', '.join(conditions)}\":")
-    padding = 20
-    alpha_risk = 0.05
+    normality = True
+    homoscedasticity = True
+    data_description_text = ""
     with open(out_path, "w") as out:
-        out.write("############################\n")
-        out.write("#                          #\n")
-        out.write("#     data description     #\n")
-        out.write("#                          #\n")
-        out.write("############################\n\n")
-        normality = True
-        variance_equality = True
+        title_box = write_stat_section_header("Data Description")
+        out.write(title_box)
         for condition in conditions:
-            conditions_subsampling_list.append(src[f"RMSD {method}"][src["conditions"] == condition])
-            condition_rows = src[f"RMSD {method}"][src["conditions"] == condition]
-            out.write(f"Description of the \"{condition}\" distribution:\n")
-            description = scipy.stats.describe(condition_rows)
-            out.write(f"\t{'observations:':<{padding}}{description.nobs}\n")
-            out.write(f"\t{'minimum:':<{padding}}{description.minmax[0]}\n")
-            out.write(f"\t{'maximum:':<{padding}}{description.minmax[1]}\n")
-            out.write(f"\t{'mean:':<{padding}}{description.mean}\n")
-            out.write(f"\t{'variance:':<{padding}}{description.variance}\n")
-            out.write(f"\t{'skewness:':<{padding}}{description.skewness}\n")
-            out.write(f"\t{'kurtosis:':<{padding}}{description.kurtosis}\n")
+            aggregated_condition_rows = src[f"RMSD {method}"][src["condition"] == condition]
+            aggregated_conditions_subsampling_list.append(aggregated_condition_rows)
+
+            if data_description_text == "":
+                data_description_text = f"Description of the aggregated \"{condition}\" distribution:"
+            data_description_text = data_description(aggregated_condition_rows, padding_space,
+                                                     data_description_text)
+            out.write(data_description_text)
+            data_description_text = ""
 
             out.write(f"\nNormality test (Shapiro) for the \"{condition}\" distribution:\n")
-            shapiro_test = scipy.stats.shapiro(condition_rows)
-            out.write(get_stat_results_as_text(shapiro_test, padding))
-            message = (f"{'Interpretation:':<{padding}}\"{condition}\" distribution "
+            if len(aggregated_condition_rows) > 5000:
+                logging.warning("\tShapiro Test (Normality) p-value may not be accurate as N > 5000")
+                out.write("\t/!\ p-value may not be accurate as N > 5000")
+            shapiro_test = scipy.stats.shapiro(aggregated_condition_rows)
+            out.write(get_stat_results_as_text(shapiro_test, padding_space))
+            message = (f"{'Interpretation:':<{padding_space}}\"{condition}\" distribution "
                        f"{'do not f' if shapiro_test.pvalue <= alpha_risk else 'f'}ollows a Normal law at \u03B1 risk "
                        f"of {alpha_risk} (p.value {'<=' if shapiro_test.pvalue <= alpha_risk else '>'} {alpha_risk})")
             out.write(f"\t{message}\n\n")
@@ -271,31 +459,31 @@ def compute_stats(src, method, out_path):
                 normality = False
 
         out.write(f"\nVariance equality (Bartlett test) for the \"{', '.join(conditions)}\" distributions:\n")
-        bartlett = scipy.stats.bartlett(*conditions_subsampling_list)
-        out.write(get_stat_results_as_text(bartlett, padding))
-        message = (f"{'Interpretation:':<{padding}}For \"{', '.join(conditions)}\" distributions the variance are  "
-                   f"{'not' if bartlett.pvalue <= alpha_risk else ''} equals at \u03B1 risk "
-                   f"of {alpha_risk} (p.value {'<=' if bartlett.pvalue <= alpha_risk else '>'} {alpha_risk})")
+        bartlett = scipy.stats.bartlett(*aggregated_conditions_subsampling_list)
+        out.write(get_stat_results_as_text(bartlett, padding_space))
+        message = (
+            f"{'Interpretation:':<{padding_space}}For \"{', '.join(conditions)}\" distributions the variance are  "
+            f"{'not' if bartlett.pvalue <= alpha_risk else ''} equals at \u03B1 risk "
+            f"of {alpha_risk} (p.value {'<=' if bartlett.pvalue <= alpha_risk else '>'} {alpha_risk})")
         out.write(f"\t{message}\n\n")
         if bartlett.pvalue < alpha_risk:
-            variance_equality = False
+            homoscedasticity = False
 
-        out.write("\n############################\n")
-        out.write("#                          #\n")
-        out.write("#     statistical tests    #\n")
-        out.write("#                          #\n")
-        out.write("############################\n\n")
+        title_box = write_stat_section_header("Statistical Tests")
+        out.write(f"\n{title_box}")
 
-        if normality and variance_equality:
-            message = (" All the distributions follows a normal law and have equal variances, ANOVA and T-test will be "
-                       "applied. ")
+        if normality and homoscedasticity:
+            message = (
+                " All the distributions follows a normal law and have equal variances, ANOVA and T-test will be "
+                "applied. ")
             out.write(f"{message:*^150}\n")
             out.write(f"\nANOVA test for the \"{', '.join(conditions)}\" distributions:\n")
-            test = scipy.stats.f_oneway(*conditions_subsampling_list)
+            test = scipy.stats.f_oneway(*aggregated_conditions_subsampling_list)
         else:
-            if not normality and variance_equality:
-                prefix_message = (" At least one distribution do not follows a normal law and the distributions do not "
-                                  "have equal variances")
+            if not normality and homoscedasticity:
+                prefix_message = (
+                    " At least one distribution do not follows a normal law and the distributions do not "
+                    "have equal variances")
             elif not normality:
                 prefix_message = " At least one distribution do not follows a normal law"
             else:
@@ -303,30 +491,32 @@ def compute_stats(src, method, out_path):
             message = f"{prefix_message}, Kruskall-Wallis and Mann-Whitney U tests will be applied. "
             out.write(f"{message:*^150}\n")
             out.write(f"\nKruskall Wallis test for the \"{', '.join(conditions)}\" distributions:\n")
-            test = scipy.stats.kruskal(*conditions_subsampling_list)
-        out.write(get_stat_results_as_text(test, padding))
-        message = (f"{'Interpretation:':<{padding}}at least one distribution has a mean distinct from the others at a "
-                   f"\u03B1 risk of {alpha_risk} (p.value {'<=' if test.pvalue <= alpha_risk else '>'} {alpha_risk})")
+            test = scipy.stats.kruskal(*aggregated_conditions_subsampling_list)
+        out.write(get_stat_results_as_text(test, padding_space))
+        message = (
+            f"{'Interpretation:':<{padding_space}}at least one distribution has a mean distinct from the others at a "
+            f"\u03B1 risk of {alpha_risk} (p.value {'<=' if test.pvalue <= alpha_risk else '>'} {alpha_risk})")
         out.write(f"\t{message}\n\n")
 
         for i in range(len(conditions) - 1):
-            distribution_i = src[f"RMSD {method}"][src["conditions"] == conditions[i]]
-            for j in range(i+1, len(conditions)):
-                distribution_j = src[f"RMSD {method}"][src["conditions"] == conditions[j]]
+            distribution_i = src[f"RMSD {method}"][src["condition"] == conditions[i]]
+            for j in range(i + 1, len(conditions)):
+                distribution_j = src[f"RMSD {method}"][src["condition"] == conditions[j]]
                 if normality:
-                    out.write(f"\nStudent test for the \"{conditions[i]}\" and \"{conditions[j]}\" distributions:\n")
+                    out.write(
+                        f"\nStudent test for the \"{conditions[i]}\" and \"{conditions[j]}\" distributions:\n")
                     test = scipy.stats.ttest_ind(distribution_i, distribution_j)
                 else:
                     out.write(f"\nMann Withney U test for the \"{conditions[i]}\" and \"{conditions[j]}\" "
                               f"distributions:\n")
                     test = scipy.stats.mannwhitneyu(distribution_i, distribution_j)
-                out.write(get_stat_results_as_text(test, padding))
-                message = (f"{'Interpretation:':<{padding}}\"{conditions[i]}\" and \"{conditions[j]}\" have "
+                out.write(get_stat_results_as_text(test, padding_space))
+                message = (f"{'Interpretation:':<{padding_space}}\"{conditions[i]}\" and \"{conditions[j]}\" have "
                            f"{'a different' if test.pvalue <= alpha_risk else 'the same'} mean at a \u03B1 risk of "
                            f"{alpha_risk} (p.value {'<=' if test.pvalue <= alpha_risk else '>'} {alpha_risk})")
                 out.write(f"\t{message}\n\n")
 
-    logging.info(f"\tStatistical tests results written: {out_path}")
+    logging.info(f"\tStatistical tests on aggregated data written: {out_path}")
 
 
 if __name__ == "__main__":
@@ -357,7 +547,9 @@ if __name__ == "__main__":
                         help="the molecular dynamics duration in nanoseconds.")
     parser.add_argument("-d", "--domain", required=True, type=str,
                         help="Free text to specify the domain on which the RMS was computed.")
-    parser.add_argument("-a", "--aggregation", required=False, default="median", choices=["median", "average"],
+    parser.add_argument("-a", "--alpha", required=False, default=0.05, type=float,
+                        help="the risk alpha to apply for the statistical tests.")
+    parser.add_argument("-m", "--method-aggregation", required=False, default="median", choices=["median", "average"],
                         help="the aggregation method to apply.")
     parser.add_argument("-x", "--format", required=False, default="svg",
                         choices=["eps", "jpg", "jpeg", "pdf", "pgf", "png", "ps", "raw", "svg", "svgz", "tif", "tiff"],
@@ -368,6 +560,8 @@ if __name__ == "__main__":
                              "'rgba': 'Raw RGBA bitmap', 'svg': 'Scalable Vector Graphics', "
                              "'svgz': 'Scalable Vector Graphics', 'tif': 'Tagged Image File Format', "
                              "'tiff': 'Tagged Image File Format'. Default is 'svg'.")
+    parser.add_argument("-p", "--padding", required=False, default=40, type=int,
+                        help="the space between the key and the value of a result in the statistical files.")
     parser.add_argument("-l", "--log", required=False, type=str,
                         help="the path for the log file. If this option is skipped, the log file is created in the "
                              "output directory.")
@@ -396,15 +590,25 @@ if __name__ == "__main__":
     logging.info(f"Domain: {args.domain:>16}")
 
     data_conditions = get_conditions(args.input)
-    rmsd_by_condition, data_conditions = aggregate_rmsd(data_conditions, args.aggregation,
-                                                        os.path.join(args.out,
-                                                                     f"RMSD_data_{args.domain.replace(' ', '-')}_"
-                                                                     f"{args.md_time}-ns.csv"))
-    lineplot_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format, data_conditions["color"].to_list(),
-                             args.aggregation, args.domain)
-    histogram_aggregated_rmsd(rmsd_by_condition, args.md_time, args.out, args.format,
-                              data_conditions["color"].to_list(), args.aggregation, args.domain)
+    rmsd_aggregated, rmsd_by_condition, data_conditions = extract_rmsd_data(data_conditions, args.method_aggregation,
+                                                                            args.out, args.domain, args.md_time)
 
-    compute_stats(rmsd_by_condition, args.aggregation, os.path.join(args.out,
-                                                                f"statistics_RMSD_data_{args.domain.replace(' ', '-')}"
-                                                                f"_{args.md_time}-ns.txt"))
+    # data for all the samples by condition
+    rmsd_data_for_stats = data_for_stats(rmsd_by_condition)
+    mean_conf_inter = compute_stats_by_condition(rmsd_data_for_stats, args.alpha, args.padding,
+                                                 os.path.join(args.out,
+                                                              f"statistics_RMSD_{args.domain.replace(' ', '-')}_"
+                                                              f"{args.md_time}-ns.txt"))
+    histogram_rmsd(rmsd_by_condition, mean_conf_inter, args.domain, args.md_time, args.out, args.format,
+                   data_conditions["color"].to_list())
+
+
+    # aggregated data by condition
+    lineplot_aggregated_rmsd(rmsd_aggregated, args.md_time, args.out, args.format, data_conditions["color"].to_list(),
+                             args.method_aggregation, args.domain)
+    histogram_aggregated_rmsd(rmsd_aggregated, args.md_time, args.out, args.format,
+                              data_conditions["color"].to_list(), args.method_aggregation, args.domain)
+    rmsd_data_aggregated_for_stats = data_for_stats(rmsd_aggregated)
+    compute_stats_aggregated(rmsd_data_aggregated_for_stats, args.method_aggregation, args.alpha, args.padding,
+                             os.path.join(args.out, f"statistics_{args.method_aggregation}_aggregated_RMSD_"
+                                                    f"{args.domain.replace(' ', '-')}_{args.md_time}-ns.txt"))
