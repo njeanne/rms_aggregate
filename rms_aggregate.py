@@ -7,7 +7,7 @@ Created on 18 Apr. 2023
 __author__ = "Nicolas JEANNE"
 __copyright__ = "GNU General Public License"
 __email__ = "jeanne.n@chu-toulouse.fr"
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import argparse
 import logging
@@ -70,7 +70,7 @@ def get_conditions(path):
     return df
 
 
-def extract_rmsd_data(conditions, method, out_dir, domain, md_time):
+def extract_rmsd_data(conditions, method, out_dir, domain, md_time, exclude):
     """
     Extract the RMSD values of each sample and return the aggregated RMSD values for each frame.
 
@@ -84,6 +84,8 @@ def extract_rmsd_data(conditions, method, out_dir, domain, md_time):
     :type domain: str
     :param md_time: the molecular dynamics simulation time.
     :type md_time: int
+    :param exclude: the files' names to exclude from the analysis.
+    :type exclude: list
     :return: the aggregated data for each frame, the RMSD data grouped by condition and the conditions (in case one 
     condition is removed).
     :rtype: pandas.DataFrame, pandas.DataFrame, pandas.DataFrame
@@ -95,8 +97,19 @@ def extract_rmsd_data(conditions, method, out_dir, domain, md_time):
     conditions_to_remove = []
     for _, row_condition in conditions.iterrows():
         df_raw = pd.DataFrame()
-        by_condition = [fn for fn in os.listdir(row_condition["path"]) if
-                        fn.startswith("RMSD") and not "histogram" in fn and fn.endswith(".csv")]
+
+        by_condition = []
+        for fn in os.listdir(row_condition["path"]):
+            if fn.startswith("RMSD") and not "histogram" in fn and fn.endswith(".csv"):
+                if exclude:
+                    if os.path.splitext(fn)[0] not in exclude:
+                        by_condition.append(fn)
+                    else:
+                        logging.info(f"Condition {row_condition['condition']}, {fn} excluded as defined in "
+                                     f"\"--exclude\" option.")
+                else:
+                    by_condition.append(fn)
+
         if len(by_condition) == 0:
             conditions_to_remove.append(row_condition["condition"])
             logging.warning(f"Condition {row_condition['condition']}: no RMSD files, this condition is skipped.")
@@ -196,11 +209,11 @@ def histogram_rmsd(src, src_ci, domain, md_time, dir_path, fmt, conditions_color
     # add the Means and Confidence intervals
     ci_y_coord = rmsd_ax.get_ylim()[1]
     for index, row in src_ci.iterrows():
-        rmsd_ax.hlines(ci_y_coord, row["min confidence interval"], row["max confidence interval"], linestyle="--",
-                       color=conditions_colors[index])
-        rmsd_ax.plot(row["min confidence interval"], ci_y_coord, marker="|", color=conditions_colors[index])
+        rmsd_ax.hlines(ci_y_coord, row["minimum confidence interval"], row["maximum confidence interval"],
+                       linestyle="--", color=conditions_colors[index])
+        rmsd_ax.plot(row["minimum confidence interval"], ci_y_coord, marker="|", color=conditions_colors[index])
         rmsd_ax.plot(row["mean"], ci_y_coord, marker="o", color=conditions_colors[index])
-        rmsd_ax.plot(row["max confidence interval"], ci_y_coord, marker="|", color=conditions_colors[index])
+        rmsd_ax.plot(row["maximum confidence interval"], ci_y_coord, marker="|", color=conditions_colors[index])
         ci_y_coord = ci_y_coord + 0.05
 
     plot = rmsd_ax.get_figure()
@@ -269,7 +282,7 @@ def data_description(data, padding, txt):
     return txt
 
 
-def compute_stats_by_condition(src, alpha_risk, padding_space, out_path):
+def compute_stats_by_condition(src, alpha_risk, out_path):
     """
     Compute the statistics of the RMSD for all the samples by condition.
 
@@ -293,32 +306,28 @@ def compute_stats_by_condition(src, alpha_risk, padding_space, out_path):
 
     logging.info(f"Performing statistical tests for all the RMSD data for the following conditions "
                  f"\"{', '.join(conditions)}\":")
-    txt_mean_ci = ""
-    conf_intervals = {"condition": [], "mean": [], "min confidence interval": [], "max confidence interval": []}
-    with open(out_path, "w") as out:
-        title_box = write_stat_section_header("Data Description")
-        out.write(title_box)
-        for condition in conditions:
-            condition_rows = src[f"RMSD"][src["condition"] == condition]
-            data_description_text = data_description(condition_rows, padding_space,
-                                                     f"\nDescription of the \"{condition}\" distribution:")
-            out.write(data_description_text)
-            txt_mean_ci = f"{txt_mean_ci}Condition \"{condition}\":\n"
-            mean = numpy.mean(condition_rows)
-            norm_ci = scipy.stats.norm.interval(1 - alpha_risk, loc=mean, scale=numpy.std(condition_rows))
-            conf_intervals["condition"].append(condition)
-            conf_intervals["mean"].append(mean)
-            conf_intervals["min confidence interval"].append(norm_ci[0])
-            conf_intervals["max confidence interval"].append(norm_ci[1])
-            txt_mean_ci = f"{txt_mean_ci}\t{'Mean:':<{padding_space}}{mean}\n"
-            txt_mean_ci = f"{txt_mean_ci}\t{'Confidence interval:':<{padding_space}}{norm_ci[0]} - {norm_ci[1]}\n\n"
+    conf_intervals = {"condition": [], "mean": [], "minimum confidence interval": [], "maximum confidence interval": [],
+                      "observations": [], "minimum": [], "maximum": [], "variance": [], "skewness": [], "kurtosis": []}
+    for condition in conditions:
+        condition_rows = src[f"RMSD"][src["condition"] == condition]
+        description = scipy.stats.describe(condition_rows)
+        norm_ci = scipy.stats.norm.interval(1 - alpha_risk, loc=description.mean, scale=numpy.std(condition_rows))
+        # fill the results
+        conf_intervals["condition"].append(condition)
+        conf_intervals["mean"].append(description.mean)
+        conf_intervals["minimum confidence interval"].append(norm_ci[0])
+        conf_intervals["maximum confidence interval"].append(norm_ci[1])
+        conf_intervals["observations"].append(description.nobs)
+        conf_intervals["minimum"].append(description.minmax[0])
+        conf_intervals["maximum"].append(description.minmax[1])
+        conf_intervals["variance"].append(description.variance)
+        conf_intervals["skewness"].append(description.skewness)
+        conf_intervals["kurtosis"].append(description.kurtosis)
 
-        title_box = write_stat_section_header("Confidence Intervals")
-        out.write(f"\n{title_box}\n")
-        out.write(txt_mean_ci)
-
+    df = pd.DataFrame.from_dict(conf_intervals)
+    df.to_csv(out_path, index=False)
     logging.info(f"\tStatistical tests on all the samples by condition written: {out_path}")
-    return pd.DataFrame.from_dict(conf_intervals)
+    return df
 
 
 def lineplot_aggregated_rmsd(src, md_time, dir_path, fmt, conditions_colors, method, domain):
@@ -551,6 +560,9 @@ if __name__ == "__main__":
                         help="the risk alpha to apply for the statistical tests.")
     parser.add_argument("-m", "--method-aggregation", required=False, default="median", choices=["median", "average"],
                         help="the aggregation method to apply.")
+    parser.add_argument("-e", "--exclude", required=False, nargs="+",
+                        help="The file names to exclude from the files in the directories set in the input CSV file. "
+                             "The files names must be written without extension and separated by a space.")
     parser.add_argument("-x", "--format", required=False, default="svg",
                         choices=["eps", "jpg", "jpeg", "pdf", "pgf", "png", "ps", "raw", "svg", "svgz", "tif", "tiff"],
                         help="the output plots format: 'eps': 'Encapsulated Postscript', "
@@ -591,14 +603,15 @@ if __name__ == "__main__":
 
     data_conditions = get_conditions(args.input)
     rmsd_aggregated, rmsd_by_condition, data_conditions = extract_rmsd_data(data_conditions, args.method_aggregation,
-                                                                            args.out, args.domain, args.md_time)
+                                                                            args.out, args.domain, args.md_time,
+                                                                            args.exclude)
 
     # data for all the samples by condition
     rmsd_data_for_stats = data_for_stats(rmsd_by_condition)
-    mean_conf_inter = compute_stats_by_condition(rmsd_data_for_stats, args.alpha, args.padding,
+    mean_conf_inter = compute_stats_by_condition(rmsd_data_for_stats, args.alpha,
                                                  os.path.join(args.out,
                                                               f"statistics_RMSD_{args.domain.replace(' ', '-')}_"
-                                                              f"{args.md_time}-ns.txt"))
+                                                              f"{args.md_time}-ns.csv"))
     histogram_rmsd(rmsd_by_condition, mean_conf_inter, args.domain, args.md_time, args.out, args.format,
                    data_conditions["color"].to_list())
 
