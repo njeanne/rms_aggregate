@@ -99,7 +99,7 @@ def boxplots_by_conditions(data, dir_path, dom, molecular_dynamics_time, fmt):
     boxplots = ax.get_figure()
     plt.suptitle(f"Samples RMSD by conditions on {molecular_dynamics_time} ns: {dom}", fontsize="large",
                  fontweight="bold")
-    out_path = os.path.join(dir_path, f"RMSD_samples_boxplots_by_conditions.{fmt}")
+    out_path = os.path.join(dir_path, f"RMSD_samples_boxplots_{dom}_{molecular_dynamics_time}-ns.{fmt}")
     boxplots.savefig(out_path)
     return out_path
 
