@@ -66,9 +66,9 @@ conda deactivate
 |JQ679014_WT_ORF1_0_HVR   |WT (5)        |0.8716277115849276|
 
 
-- the RMSD boxplots for each sample: `RMSD_samples_boxplots_by_conditions.svg`
+- the RMSD boxplots for each sample: `RMSD_samples_boxplots_HVR_1020-ns.svg`
 
-![Samples RMSD boxplots](doc/_static/RMSD_samples_boxplots_by_conditions.svg)
+![Samples RMSD boxplots](doc/_static/RMSD_samples_boxplots_HVR_1020-ns.svg)
 
 - a statistics file with the confidence interval values: `statistics_RMSD_HVR_1020-ns.csv`
 
