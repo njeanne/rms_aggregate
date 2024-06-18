@@ -7,7 +7,7 @@ Created on 18 Apr. 2023
 __author__ = "Nicolas JEANNE"
 __copyright__ = "GNU General Public License"
 __email__ = "jeanne.n@chu-toulouse.fr"
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 import argparse
 import logging
@@ -70,7 +70,41 @@ def get_conditions(path):
     return df
 
 
-def extract_rmsd_data(conditions, method, out_dir, domain, md_time, exclude):
+def boxplots_by_conditions(data, dir_path, dom, molecular_dynamics_time, fmt):
+    """
+    Create the boxplots for each sample.
+
+    :param data: the RMSD values by sample and condition.
+    :type data: dict
+    :param dir_path: output directory path.
+    :type dir_path: str
+    :param dom: the domain.
+    :type dom: str
+    :param molecular_dynamics_time: the molecular dynamics simulation time.
+    :type molecular_dynamics_time: int
+    :param fmt: the output format for the plot.
+    :type fmt: str
+    :return: the boxplot path.
+    :rtype: str
+    """
+    # clear the previous plot
+    plt.clf()
+    plt.figure(figsize=(15, 15))
+    df = pd.DataFrame.from_dict(data)
+    ax = sns.boxplot(data=df, x="sample", y="RMSD", hue="condition")
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, horizontalalignment="right")
+    ax.set(xlabel=None)
+    plt.ylabel(f"RMSD (\u212B)", fontweight="bold")
+    plt.tight_layout()
+    boxplots = ax.get_figure()
+    plt.suptitle(f"Samples RMSD by conditions on {molecular_dynamics_time} ns: {dom}", fontsize="large",
+                 fontweight="bold")
+    out_path = os.path.join(dir_path, f"RMSD_samples_boxplots_by_conditions.{fmt}")
+    boxplots.savefig(out_path)
+    return out_path
+
+
+def extract_rmsd_data(conditions, method, out_dir, domain, md_time, exclude, format):
     """
     Extract the RMSD values of each sample and return the aggregated RMSD values for each frame.
 
@@ -86,7 +120,9 @@ def extract_rmsd_data(conditions, method, out_dir, domain, md_time, exclude):
     :type md_time: int
     :param exclude: the files' names to exclude from the analysis.
     :type exclude: list
-    :return: the aggregated data for each frame, the RMSD data grouped by condition and the conditions (in case one 
+    :param format: the output format for the plot.
+    :type format: str
+    :return: the aggregated data for each frame, the RMSD data grouped by condition and the conditions (in case one
     condition is removed).
     :rtype: pandas.DataFrame, pandas.DataFrame, pandas.DataFrame
     """
@@ -160,9 +196,16 @@ def extract_rmsd_data(conditions, method, out_dir, domain, md_time, exclude):
             elif method == "average":
                 aggregated.append(row_rmsd.mean())
         data_aggregated[f"RMSD {method}"] = data_aggregated[f"RMSD {method}"] + aggregated
+
+    # create the boxplots
+    boxplot_path = boxplots_by_conditions(data_by_condition, out_dir, domain, md_time, format)
+    logging.info(f"Boxplots of the distributions by conditions: {boxplot_path}")
+
+
     # remove conditions if necessary
     for condition_to_remove in conditions_to_remove:
         conditions.drop(conditions[conditions["condition"] == condition_to_remove].index, inplace = True)
+
 
     df_by_condition = pd.DataFrame.from_dict(data_by_condition)
     out_by_condition = os.path.join(out_dir, f"RMSD_data_{domain.replace(' ', '-')}_{md_time}-ns.csv")
@@ -248,7 +291,6 @@ def write_stat_section_header(title):
     :return: the box with the title.
     :rtype: str
     """
-
     box_size = len(title) + 2 * 6
     box = (f"{'#' * box_size}\n"
            f"#{' ' * (box_size - 2)}#\n"
@@ -604,7 +646,7 @@ if __name__ == "__main__":
     data_conditions = get_conditions(args.input)
     rmsd_aggregated, rmsd_by_condition, data_conditions = extract_rmsd_data(data_conditions, args.method_aggregation,
                                                                             args.out, args.domain, args.md_time,
-                                                                            args.exclude)
+                                                                            args.exclude, args.format)
 
     # data for all the samples by condition
     rmsd_data_for_stats = data_for_stats(rmsd_by_condition)
