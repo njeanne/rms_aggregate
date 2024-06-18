@@ -70,12 +70,14 @@ def get_conditions(path):
     return df
 
 
-def boxplots_by_conditions(data, dir_path, dom, molecular_dynamics_time, fmt):
+def boxplots_by_conditions(data, conditions_colors, dir_path, dom, molecular_dynamics_time, fmt):
     """
     Create the boxplots for each sample.
 
     :param data: the RMSD values by sample and condition.
     :type data: dict
+    :param conditions_colors: the colors of the conditions.
+    :type conditions_colors: list
     :param dir_path: output directory path.
     :type dir_path: str
     :param dom: the domain.
@@ -91,7 +93,7 @@ def boxplots_by_conditions(data, dir_path, dom, molecular_dynamics_time, fmt):
     plt.clf()
     plt.figure(figsize=(15, 15))
     df = pd.DataFrame.from_dict(data)
-    ax = sns.boxplot(data=df, x="sample", y="RMSD", hue="condition")
+    ax = sns.boxplot(data=df, x="sample", y="RMSD", hue="condition", palette=conditions_colors)
     ax.set_xticklabels(ax.get_xticklabels(), rotation=45, horizontalalignment="right")
     ax.set(xlabel=None)
     plt.ylabel(f"RMSD (\u212B)", fontweight="bold")
@@ -99,7 +101,7 @@ def boxplots_by_conditions(data, dir_path, dom, molecular_dynamics_time, fmt):
     boxplots = ax.get_figure()
     plt.suptitle(f"Samples RMSD by conditions on {molecular_dynamics_time} ns: {dom}", fontsize="large",
                  fontweight="bold")
-    out_path = os.path.join(dir_path, f"RMSD_samples_boxplots_{dom}_{molecular_dynamics_time}-ns.{fmt}")
+    out_path = os.path.join(dir_path, f"RMSD_boxplots_by_sample_{dom}_{molecular_dynamics_time}-ns.{fmt}")
     boxplots.savefig(out_path)
     return out_path
 
@@ -198,7 +200,8 @@ def extract_rmsd_data(conditions, method, out_dir, domain, md_time, exclude, for
         data_aggregated[f"RMSD {method}"] = data_aggregated[f"RMSD {method}"] + aggregated
 
     # create the boxplots
-    boxplot_path = boxplots_by_conditions(data_by_condition, out_dir, domain, md_time, format)
+    boxplot_path = boxplots_by_conditions(data_by_condition, conditions["color"].to_list(), out_dir, domain, md_time,
+                                          format)
     logging.info(f"Boxplots of the distributions by conditions: {boxplot_path}")
 
 
